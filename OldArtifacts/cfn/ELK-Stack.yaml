@@ -1,0 +1,98 @@
+###########################################################################
+#  Copyright 2020 DataRobot Inc. All Rights Reserved.                     #
+#                                                                         #
+#  This file is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES       #
+#  OR CONDITIONS OF ANY KIND, express or implied.                         #
+###########################################################################
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: DataRobot CloudFormation stack to create the EC2 instances for the cluster
+Parameters:
+  MainStack:
+    Type: String
+  DRVersion:
+    Type: String
+    Description: DataRobot version to install
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})'
+    Default: 6.3.2
+  SSHKey:
+    Type: "AWS::EC2::KeyPair::KeyName"
+    Description: Key pair to use for connectivity
+  SubnetId:
+    Type: "AWS::EC2::Subnet::Id"
+    Description: Subnet for cluster
+  SecurityGroupIds:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: Cluster Security Group Id
+  ImageId:
+    Type: AWS::EC2::Image::Id
+    Description: Bitnami ELK Stack
+    Default: ami-057003735f334240e
+  InstanceType:
+    Type: String
+    Description: AWS Instance Type
+    AllowedValues: [ "c5.xlarge", "c5.2xlarge", "c5.4xlarge" ]
+    Default: c5.4xlarge
+  # RunScript:
+  #   Type: String
+  #   Description: Script to run at first boot
+  NodeVolumeSize:
+    Type: Number
+    Description: Hard drive size for ELK node
+    AllowedValues: [ 1024, 2048, 4096 ]
+    Default: 1024
+  Region:
+    Type: String
+    Description: Region to host cluster
+    AllowedValues: [ "ap-south-1", "eu-west-1", "eu-west-2", "eu-west-3", "eu-north-1", "ap-northeast-1", "ap-northeast-2", "sa-east-1", "ca-central-1", "ap-southeast-1", "ap-southeast-2", "eu-central-1", "us-east-1", "us-east-2", "us-west-1", "us-west-2" ]
+    Default: us-east-1
+
+Resources:
+  EC2Instance:
+    Type: "AWS::EC2::Instance"
+    Properties:
+      ImageId:  !Ref ImageId
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref SSHKey
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds: !Ref SecurityGroupIds
+      Monitoring: true
+      EbsOptimized: true
+      #NetworkInterfaces: 
+      #- AssociatePublicIpAddress: !Ref PublicIpAddress
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            VolumeType: gp2
+            VolumeSize: !Ref NodeVolumeSize
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/sh
+
+          # Get the local private ip
+          my_ip=`curl --silent http://169.254.169.254/latest/meta-data/local-ipv4`
+
+          # Update the Kibana and apache configs
+          sed -i "s/127.0.0.1/$my_ip/" /opt/bitnami/kibana/config/kibana.yml 
+          sed -i "s/127.0.0.1/$my_ip/" /opt/bitnami/kibana/apache-conf/kibana.conf
+
+          /opt/bitnami/ctlscript.sh restart
+
+  # EC2InstanceHandle:
+  #   Type: AWS::CloudFormation::WaitConditionHandle
+
+  # EC2InstanceWaitCondition:
+  #   Type: AWS::CloudFormation::WaitCondition
+  #   DependsOn: EC2Instance
+  #   Properties:
+  #     Handle: !Ref EC2InstanceHandle
+  #     Timeout: 6000
+
+Outputs:
+  InstanceId:
+    Description: "InstanceId of the newly created EC2 instance"
+    Value: !Ref EC2Instance
+  PrivateIP:
+    Description: "PrivateIP IP address of the newly created EC2 instance"
+    Value: !GetAtt EC2Instance.PrivateIp

@@ -1,0 +1,1107 @@
+###########################################################################
+#  Copyright 2020 DataRobot Inc. All Rights Reserved.                     #
+#                                                                         #
+#  This file is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES       #
+#  OR CONDITIONS OF ANY KIND, express or implied.                         #
+###########################################################################
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: DataRobot Enterprise cluster stack
+
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups: 
+      - Label: 
+          default: Cluster Settings
+        Parameters:
+          - ClusterType
+          - Debug
+          - DRVersion
+          - DownloadURL
+          - S3Bucket
+          - LogServer
+      - Label: 
+          default: Network Settings
+        Parameters:
+          - Region 
+          - VpcId
+          - Subnet
+          - PublicIpAddress
+          - SSHKey
+          - CidrBlock
+          - ExternalIPAddress
+      - Label: 
+          default: Node Settings
+        Parameters:
+          - OperatingSystem
+          - Encrypted
+          - EncryptionKey
+          - SecretsEnforced
+          - NodeSize
+          - AppSize
+          - DataSize
+          - DPEDataSize
+          - ModManDataSize
+          - ModelingDataSize
+      - Label: 
+          default: Storage Settings
+        Parameters:
+          - StorageType
+          - StorageDir
+      - Label:
+          default: SnapShot Configuration
+        Parameters:
+          - UseScheduler
+          - CustomTagName
+          - AutoSnapshotDeletion
+          - RetentionPeriod
+          - ScheduleExpression
+
+      - Label:
+          default: S3Bucket backup storage. Cannot be conbined with EBS snapshots.
+        Parameters:
+          - UseS3BucketBackups
+          - BackupDir
+          - S3BucketBackupSchedule
+
+      - Label:
+          default: AutoScaling Configuration
+        Parameters:
+          - UseAutoScaling
+          - AutoScaleGroup
+          - AutoScaleCap
+          - AutoScaleMax
+          - AutoScaleMin
+          - EvaluationPeriodsAdd
+          - EvaluationPeriodsRemove
+          - LaunchConfigName
+          - MetricNamespace
+          - PeriodAdd
+          - PeriodRemove
+          - RetryDelay
+          - Retries
+          - ScaleUpAlarm
+          - ScaleDownAlarm
+          - ScaleDownPolicy
+          - ScaleUpPolicy
+          - ScalingAdjustmentAdd
+          - ScalingAdjustmentRemove
+          - SkipAMI
+          - ThresholdAdd
+          - ThresholdRemove
+          - WatchedMetric
+          - WorkerImageName
+          - WorkerName
+          - WorkerType
+
+Parameters:
+  # Update from here to END to preset your values
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Virtual Private Cloud Id
+    #Default: vpc-<some vpc id>
+  Subnet:
+    Type: "AWS::EC2::Subnet::Id"
+    Description: Subnet ID for the first App node and DPE
+    #Default: subnet-<some subnet id>
+  CidrBlock:
+    Type: String
+    Description: The IPv4 CIDR that can communicate with these EC2 instances. Please refer to https://console.aws.amazon.com/vpc/home?subnets&sort=SubnetId:sort=SubnetId&subnets:sort=SubnetId&region=us-east-1#subnets:sort=SubnetId for more
+    MinLength: '9'
+    MaxLength: '18'
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})'
+    ConstraintDescription: Must be a valid IP CIDR range of the form x.x.x.x/x, usually the same as the VPC CIDR Block
+    #Default: <some ip>/<some cidr block>
+  ExternalIPAddress:
+    Type: String
+    Description: IP Address of external connection, with the "/32" post fix. https://www.whatsmyip.org/
+    #Default: <some ip>/32
+  DownloadURL:
+    Type: String
+    Description: Link to the time expiring DataRobot installation archive
+    #Default: "<a time expiring link>"
+  SSHKey:
+    Type: "AWS::EC2::KeyPair::KeyName"
+    Description: Valid AWS Key for SSH connectivity 
+    #Default: <a valid key name>
+  S3Bucket:
+    Type: String
+    Description: The repository S3 bucket name
+    #Default: <Some bucket name>
+  # KMS Encryption
+  Encrypted:
+    Type: String
+    Description: Enable encryption on the DataRobot Application Drive?
+    Default: false
+    AllowedValues: [ true, false ]
+  EncryptionKey:
+    Type: String
+    Description: AWS KMS key used to encrypt the DataRobot App drive at /opt/datarobot
+    Default: ""
+    # Default: 1234abcd-5678-efgh-90ij-1a2b3c4d5e6f
+  # END
+  Debug:
+    Type: String
+    Description: Use DEBUG settings
+    Default: false
+    AllowedValues: [ true, false ]
+
+  DRVersion:
+    Type: String
+    Description: DataRobot version to install
+    AllowedValues: [ "6.3.2", "6.3.3", "7.0.0", "7.0.2" ]
+    Default: 7.0.2
+
+  Region:
+    Type: String
+    Description: Region to host cluster
+    AllowedValues: [ "ap-south-1", "eu-west-1", "eu-west-2", "eu-west-3", "eu-north-1", "ap-northeast-1", "ap-northeast-2", "sa-east-1", "ca-central-1", "ap-southeast-1", "ap-southeast-2", "eu-central-1", "us-east-1", "us-east-2", "us-west-1", "us-west-2" ]
+    Default: us-east-1
+  ClusterType:
+    Type: String
+    Description: Type of cluster to build.
+    AllowedValues: [ "SingleNode", "PoC", "PreProd", "QuickStart" ] 
+    Default: PoC
+  NodeSize:
+    Type: Number
+    Description: Hard drive size for Operating System
+    AllowedValues: [ 40, 60, 80, 100 ]
+    Default: 80
+  AppSize:
+    Type: Number
+    Description: Hard drive size for Application Node
+    AllowedValues: [ 128, 256, 512 ]
+    Default: 256
+  DataSize:
+    Type: Number
+    Description: Hard drive size for DataRobot on the Data Node
+    AllowedValues: [ 1024, 2048, 4096 ]
+    Default: 2048
+  ModManDataSize:
+    Type: Number
+    Description: Hard drive size for DataRobot on the Model Management Node
+    AllowedValues: [ 1024, 2048, 4096 ]
+    Default: 1024
+  DPEDataSize:
+    Type: Number
+    Description: Hard drive size for DataRobot on the Dedicated Prediction Engine
+    AllowedValues: [ 128, 256 ]
+    Default: 128
+  ModelingDataSize:
+    Type: Number
+    Description: Hard drive size for DataRobot on the Modeling Nodes
+    AllowedValues: [ 128, 256 ]
+    Default: 128
+  OperatingSystem:
+    Type: String
+    Description: Use RHEL or centos
+    AllowedValues: [ "rhel", "centos" ]
+    Default: centos
+  StorageDir:
+    Type: String
+    Description: Where to store the verte4x files in our S3 bucket
+    Default: "datarobot_storage"
+  SecretsEnforced:
+    Type: String
+    Description: Enable secrets and passwords for Mongo and Gluster?
+    Default: true
+    AllowedValues: [ true, false ]
+  PublicIpAddress:
+    Type: String
+    Description: Should this cluster have a Public IPs on the App and DPE nodes?
+    AllowedValues: [ true, false ]
+    Default: false
+    # Default: true
+  LogServer:
+    Type: String
+    Description: Type of Log Aggrigation Server to configure. Current options are off or Elastic/Logstacsh/Kibana. Splunk is on the way.
+    AllowedValues: [ off, ELK ]
+    Default:  off
+    # Default:  ELK
+  ### Schedule
+  UseScheduler:
+    Type: String
+    Description: Deploy Scheduler Lambda function
+    AllowedValues: [ true, false ]
+    Default: false
+  ScheduleExpression:
+    Type: String
+    Description: "Expression used for the timing of the schedule. For more, please refer to https://docs.aws.amazon.com/eventbridge/latest/userguide/scheduled-events.html"
+    Default: "cron(0 0 ? * MON-FRI *)" # Run at midnight UTC, Monday - Friday, could also use "cron(0/10 * * * ? *)" or "rate(10 minutes)"" to run it every 10 minutes for testing
+  CustomTagName:
+    Description: Custom Tag Name
+    Type: String
+    Default: scheduler:ebs-snapshot
+  RetentionPeriod:
+    Description: how many days to keep the snaphosts
+    Type: Number
+    Default: 5
+  AutoSnapshotDeletion:
+    Description: Enable auto-delete EBS snapshots after retention period.
+    Type: String
+    AllowedValues: [ 'Yes', 'No' ]
+    Default: 'Yes'
+  ### AutoScaling
+  UseAutoScaling:
+    Type: String
+    Description: Deploy AutoScaling Lambda function
+    AllowedValues: [ true, false ]
+    Default: false
+  AutoScaleGroup:
+    Type: String
+    Description: AutoScaling Group Name
+    Default: DataRobot-preprod-AutoScaling-Group
+  AutoScaleCap:
+    Type: Number
+    Description: AutoScaling Starting Capacity
+    Default: 1
+  AutoScaleMin:
+    Type: Number
+    Description: AutoScaling Minimum Capacity
+    Default: 1
+  AutoScaleMax:
+    Type: Number
+    Description: AutoScaling Maximum Capacity
+    Default: 20
+  EvaluationPeriodsAdd:
+    Type: Number
+    Description: AutoScaling Evaluation Periods Add
+    Default: 2
+  EvaluationPeriodsRemove:
+    Type: Number
+    Description: AutoScaling Evaluation Periods Remove
+    Default: 20
+  IAMPolicyName:
+    Type: String
+    Description: IAM AutoScaling Policy Name
+    Default: DataRobot-preprod-AutoScaling-IAMPolicy
+  LaunchConfigName:
+    Type: String
+    Description: AutoScaling Launch Config Name
+    Default: DataRobot-preprod-AutoScaling-LC
+  MetricNamespace:
+    Type: String
+    Description: CloudWatch AutoScaling Metric Namespace
+    Default: "DataRobot/AutoScaling/Testing"
+  PeriodAdd:
+    Type: Number
+    Description: CloudWatch Period Add
+    Default: 30
+  PeriodRemove:
+    Type: Number
+    Description: CloudWatch Period Remove
+    Default: 240
+  RetryDelay:
+    Type: Number
+    Description: CloudWatch Retry Delay
+    Default: 15
+  Retries:
+    Type: Number
+    Description: CloudWatch Retries
+    Default: 1200
+  ScaleUpAlarm:
+    Type: String
+    Description: CloudWatch Scale Up Alarm Name
+    Default: DataRobot-preprod-ScaleUp-Modeling-Capacity-Alarm
+  ScaleDownAlarm:
+    Type: String
+    Description: CloudWatch Scale Down Alarm Name
+    Default: DataRobot-preprod-ScaleDown-Modeling-Capacity-Alarm
+  ScaleDownPolicy:
+    Type: String
+    Description: CloudWatch Scale Down Policy
+    Default: DataRobot-preprod-ScaleDown-Policy
+  ScaleUpPolicy:
+    Type: String
+    Description: CloudWatch Scale Up Policy
+    Default: DataRobot-preprod-ScaleUp-Policy
+  ScalingAdjustmentAdd:
+    Type: Number
+    Description: AutoScaling Adjustment Add
+    Default: 1
+  ScalingAdjustmentRemove:
+    Type: Number
+    Description: AutoScaling Adjustment Remove
+    Default: -1
+  SkipAMI:
+    Type: String
+    Description: Skip the AMI craetion
+    AllowedValues: [ true, false ]
+    Default: false
+  ThresholdAdd:
+    Type: Number
+    Description: CloudWatch Alarm Add Threshold
+    Default: .75
+  ThresholdRemove:
+    Type: Number
+    Description: CloudWatch Alarm Remove Threshold
+    Default: .25
+  WatchedMetric:
+    Type: String
+    Description: CloudWatch Metric to watch
+    Default: ClusterUtilization
+  WorkerImageName:
+    Type: String
+    Description: AutoScaled Worker AMI Name
+    Default: DataRobot-preprod-AutoScaledWorkerImage
+  WorkerName:
+    Type: String
+    Description: AutoScaled Worker Name
+    Default: DataRobot-preprod-AutoScaledWorker
+  WorkerType:
+    Type: String
+    Description: AutoScaled Worker Type
+    Default: auto
+  ### StorageType selection 
+  StorageType:
+    Type: String
+    Description: How to save the data in this cluster. If using AutoScaling, you must not use minio.
+    AllowedValues: [ "minio", "s3bucket", "gluster" ]
+    Default: s3bucket
+  ### S3Bucket backup settings
+  UseS3BucketBackups:
+    Type: String
+    Description: Where to store the secrets and data file backups
+    Default: false
+    AllowedValues: [ true, false ]
+  BackupDir:
+    Type: String
+    Description: Where to store the secrets and data file backups in the bucket
+    Default: "backup_files"
+  S3BucketBackupSchedule:
+    Type: String
+    Description: "Cron tab formatted schedule. Default: '0 0 * * 1-5' or Monday - Friday at midnight"
+    Default: "0 0 * * 1-5"
+    # Default: "30 * * * *"
+
+
+Mappings:
+  # OS to user naem mapping
+  UserNameMap:
+    rhel:
+      user: "ec2-user"
+    centos:
+      user: "centos"
+  # Find the ami based on the region and OS   - Centos has been updated to 8.2.2004
+  OSRegionMap: 
+    ap-northeast-1:   # Asia Pacific (Tokyo)
+      rhel: "ami-08419d23bf91152e4"
+      centos: "ami-089a156ea4f52a0a3"
+    ap-northeast-2:   # Asia Pacific (Seoul)
+      rhel: "ami-041b16ca28f036753"
+      centos: "ami-09cdc4034bbb65412"
+    ap-south-1:       # Asia Pacific (Mumbai)
+      rhel: "ami-0963937a03c01ecd4"
+      centos: "ami-056940cb2a7bb6d71"
+    ap-southeast-1:   # Asia Pacific (Singapore)
+      rhel: "ami-055c55112e25b1f1f"
+      centos: "ami-0bfb8f6cdedb56577"
+    ap-southeast-2:   # Asia Pacific (Sydney)
+      rhel: "ami-036b423b657376f5b"
+      centos: "ami-08a0839a09bbc6f20"
+    ca-central-1:     # Canada (Central)
+      rhel: "ami-06ca3c0058d0275b3"
+      centos: "ami-07a182edcd7d04084"
+    eu-central-1:     # EU (Frankfurt)
+      rhel: "ami-09de4a4c670389e4b"
+      centos: "ami-032025b3afcbb6b34"
+    eu-north-1:       # EU (Stockholm)
+      rhel: "ami-66f67f18"
+      centos: "ami-5ee66f20"
+    eu-west-1:        # EU (Ireland)
+      rhel: "ami-0e12cbde3e77cbb98"
+      centos: "ami-0bfa4fefe067b7946"
+    eu-west-2:        # EU (London)
+      rhel: "ami-0188c0c5eddd2d032"
+      centos: "ami-0eee2548cd75b4877"
+    eu-west-3:        # EU (Paris)
+      rhel: "ami-0c4224e392ec4e440"
+      centos: "ami-05786aa5add3ca7c8"
+    sa-east-1:        # South America (São Paulo)
+      rhel: "ami-05c1c16cac05a7c0b"
+      centos: "ami-005c6439e527f2704"
+    us-east-1:        # US East (N. Virginia)
+      rhel: "ami-005b7876121b7244d"  # updated for 7.0.2 - seems 7.9 is broken, using 8.2
+      centos: "ami-01ca03df4a6012157" # ditto
+    us-east-2:        # US East (Ohio)
+      rhel: "ami-094720ddca649952f"
+      centos: "ami-000e7ce4dd68e7a11"
+    us-west-1:        # US West (N. California)
+      rhel: "ami-0ec1ad91f200c15a8"
+      centos: "ami-047d7c7dc128d1c5b"
+    us-west-2:        # US West (Oregon)
+      rhel: "ami-036affea69a1101c9"
+      centos: "ami-0b3f8f19279a5a1b1"
+  # # Find the ami based on the region and OS 
+  # ELKRegionMap: 
+  #   ap-northeast-1:   # Asia Pacific (Tokyo)
+  #     ami: "ami-08419d23bf91152e4"
+  #   ap-northeast-2:   # Asia Pacific (Seoul)
+  #     ami: "ami-041b16ca28f036753"
+  #   ap-south-1:       # Asia Pacific (Mumbai)
+  #     ami: "ami-0963937a03c01ecd4"
+  #   ap-southeast-1:   # Asia Pacific (Singapore)
+  #     ami: "ami-055c55112e25b1f1f"
+  #   ap-southeast-2:   # Asia Pacific (Sydney)
+  #     ami: "ami-036b423b657376f5b"
+  #   ca-central-1:     # Canada (Central)
+  #     ami: "ami-06ca3c0058d0275b3"
+  #   eu-central-1:     # EU (Frankfurt)
+  #     ami: "ami-09de4a4c670389e4b"
+  #   eu-north-1:       # EU (Stockholm)
+  #     ami: "ami-66f67f18"
+  #   eu-west-1:        # EU (Ireland)
+  #     ami: "ami-0e12cbde3e77cbb98"
+  #   eu-west-2:        # EU (London)
+  #     ami: "ami-0188c0c5eddd2d032"
+  #   eu-west-3:        # EU (Paris)
+  #     ami: "ami-0c4224e392ec4e440"
+  #   sa-east-1:        # South America (São Paulo)
+  #     ami: "ami-05c1c16cac05a7c0b"
+  #   us-east-1:        # US East (N. Virginia)
+  #     ami: "ami-000db10762d0c4c05"
+  #   us-east-2:        # US East (Ohio)
+  #     ami: "ami-094720ddca649952f"
+  #   us-west-1:        # US West (N. California)
+  #     ami: "ami-0ec1ad91f200c15a8"
+  #   us-west-2:        # US West (Oregon)
+  #     ami: "ami-036affea69a1101c9"
+
+  InstanceTypeMap:
+    # Single Node dev instances only
+    SingleNode:
+      "true": r5.4xlarge
+      "false": r5d.12xlarge
+    # For PreProd and Enterprise
+    AppNode:
+      "true": r5.2xlarge # m5.2xlarge
+      "false": r5.4xlarge
+    DataNode:
+      "true": m5.2xlarge
+      "false": m5.2xlarge
+    # For Poc/QuickStart
+    AppDataNode:
+      "true": m5.4xlarge
+      "false": r5.4xlarge
+    # For everything else
+    ModelManagement:
+      "true": m5.2xlarge
+      "false": c5.2xlarge
+    DedicatedPredictionServer:
+      "true": m5.2xlarge
+      "false": r5.xlarge
+    ModelingNode:
+      "true": m5.2xlarge
+      "false": r5.4xlarge
+
+Conditions: 
+  CreateELKStack: !Equals [ !Ref LogServer, ELK ]
+
+  CreateQuickStartCluster: !Equals [ !Ref ClusterType, QuickStart ]
+
+  DeployAutoScaling: !Equals [ !Ref UseAutoScaling, true ]
+
+  DeployScheduler: !Equals [ !Ref UseScheduler, true ]
+
+
+Resources:
+
+  # Apply the AutoScaling temapltes
+  AutoScalingStack:
+    Type: "AWS::CloudFormation::Stack"
+    Condition: DeployAutoScaling
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${S3Bucket}/AutoScaling/AutoScaling-Stack.yaml"
+      Parameters:
+        S3Bucket: !Ref S3Bucket
+
+  # Apply the EBS Snap Shot temapltes
+  EBSSnapShotStack:
+    Type: "AWS::CloudFormation::Stack"
+    Condition: DeployScheduler
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${S3Bucket}/Scheduler/EBS-SnapShot-Stack.yaml"
+      Parameters:
+        S3Bucket: !Ref S3Bucket
+        ScheduleExpression: !Ref ScheduleExpression
+
+  # Create the assorted security group stuff for this cluster
+  SecurityStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${S3Bucket}/SecurityGroup-${StorageType}-Stack.yaml"
+      Parameters:
+        MainStack: !Ref AWS::StackName
+        VpcId: !Ref VpcId
+        CidrBlock: !Ref CidrBlock
+        ExternalIPAddress: !Ref ExternalIPAddress
+
+  # Make the ELK stack.
+  # This needs to be expanded to beyond us-east-1
+  ELKStack:
+    Type: "AWS::CloudFormation::Stack"
+    DependsOn: SecurityStack
+    Condition : CreateELKStack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${S3Bucket}/ELK-Stack.yaml"
+      Parameters:
+        MainStack: !Ref AWS::StackName
+        DRVersion: !Ref DRVersion
+        ImageId: ami-057003735f334240e
+        InstanceType: c5.2xlarge
+        SSHKey: !Ref SSHKey
+        SubnetId: !Ref Subnet
+        SecurityGroupIds: !GetAtt SecurityStack.Outputs.InstanceSecurityGroup
+        NodeVolumeSize: !Ref DataSize
+        Region: !Ref Region
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-ELKNode
+        - Key: MainStack
+          Value: !Ref AWS::StackName
+        - Key: NodeType
+          Value: DataRobot
+        # DataRobot tag compliance
+        - Key: environment
+          Value: non-development
+        - Key: cost_center
+          Value: Support
+
+  # Apply the appropreate IAM roles (No AutoScaling)
+  IAMStack:
+    Type: "AWS::CloudFormation::Stack"
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${S3Bucket}/IAM-${ClusterType}-Stack.yaml"
+      Parameters:
+        MainStack: !Ref AWS::StackName
+        S3Bucket: !Ref S3Bucket
+
+##########################
+# Pre-Production cluster #
+##########################
+  AppNodeStack:
+    Type: "AWS::CloudFormation::Stack"
+    DependsOn: IAMStack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${S3Bucket}/EC2-Create-Parent-Stack.yaml"
+      Parameters:
+        ClusterType: !Ref ClusterType
+        DRVersion: !Ref DRVersion
+        DataVolumeSize: !Ref AppSize
+        DownloadURL: !Ref DownloadURL
+        Encrypted: !Ref Encrypted
+        EncryptionKey: !Ref EncryptionKey
+        IAmProfile: !GetAtt IAMStack.Outputs.InstanceProfile
+        ImageId: !FindInMap [ OSRegionMap, !Ref 'AWS::Region', !Ref OperatingSystem ]
+        InstallationBucket: !Ref S3Bucket
+        InstanceType: !FindInMap [ InstanceTypeMap, 'AppNode', !Ref Debug ]
+        LogServer: !Ref LogServer
+        MainStack: !Ref AWS::StackName
+        MetricNamespace: !Ref MetricNamespace
+        NodeVolumeSize: !Ref NodeSize
+        PublicIpAddress: !Ref PublicIpAddress
+        Region: !Ref Region
+        SecretsEnforced: !Ref SecretsEnforced
+        SecurityGroupIds: !GetAtt SecurityStack.Outputs.InstanceSecurityGroup
+        SSHKey: !Ref SSHKey
+        StorageDir: !Ref StorageDir
+        StorageType: !Ref StorageType
+        SubnetId: !Ref Subnet
+        UseAutoScaling: !Ref UseAutoScaling
+        UseS3BucketBackups: !Ref UseS3BucketBackups
+        BackupDir: !Ref BackupDir
+        S3BucketBackupSchedule: !Ref S3BucketBackupSchedule
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-AppNode
+        - Key: MainStack
+          Value: !Ref AWS::StackName
+        - Key: NodeType
+          Value: DataRobot
+        - Key: !Ref CustomTagName
+          Value: !Ref ScheduleExpression
+        # DataRobot tag compliance
+        - Key: environment
+          Value: non-development
+        - Key: cost_center
+          Value: Support
+
+  DataNodeStack:
+    Type: "AWS::CloudFormation::Stack"
+    DependsOn: IAMStack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${S3Bucket}/EC2-Create-Child-Stack.yaml"
+      Parameters:
+        DRVersion: !Ref DRVersion
+        DataVolumeSize: !Ref DataSize
+        Encrypted: !Ref Encrypted
+        EncryptionKey: !Ref EncryptionKey
+        IAmProfile: !GetAtt IAMStack.Outputs.InstanceProfile
+        ImageId: !FindInMap [ OSRegionMap, !Ref 'AWS::Region', !Ref OperatingSystem ]
+        InstallationBucket: !Ref S3Bucket
+        InstanceType: !FindInMap [ InstanceTypeMap, 'DataNode', !Ref Debug ]
+        LogServer: !Ref LogServer
+        MainStack: !Ref AWS::StackName
+        NodeVolumeSize: !Ref NodeSize
+        PublicIpAddress: false
+        Region: !Ref Region
+        SecurityGroupIds: !GetAtt SecurityStack.Outputs.InstanceSecurityGroup
+        SSHKey: !Ref SSHKey
+        StorageDir: !Ref StorageDir
+        SubnetId: !Ref Subnet
+        TagDataVol: true
+        UseS3BucketBackups: !Ref UseS3BucketBackups
+        BackupDir: !Ref BackupDir
+        S3BucketBackupSchedule: !Ref S3BucketBackupSchedule
+      Tags:
+        # DataRobot tags
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-DataNode
+        - Key: MainStack
+          Value: !Ref AWS::StackName
+        - Key: NodeType
+          Value: DataRobot
+        - Key: !Ref CustomTagName
+          Value: !Ref ScheduleExpression
+        # c7n tag compliance
+        - Key: environment
+          Value: non-development
+        - Key: cost_center
+          Value: Support
+
+#####################################################
+# Common between PoC / PreProd, aka not Single Node #
+#####################################################
+  DedicatedPredictionServerStack:
+    Type: "AWS::CloudFormation::Stack"
+    DependsOn: IAMStack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${S3Bucket}/EC2-Create-Child-Stack.yaml"
+      Parameters:
+        DRVersion: !Ref DRVersion
+        DataVolumeSize: !Ref DPEDataSize
+        Encrypted: !Ref Encrypted
+        EncryptionKey: !Ref EncryptionKey
+        IAmProfile: !GetAtt IAMStack.Outputs.InstanceProfile
+        ImageId: !FindInMap [ OSRegionMap, !Ref 'AWS::Region', !Ref OperatingSystem ]
+        InstallationBucket: !Ref S3Bucket
+        InstanceType: !FindInMap [ InstanceTypeMap, 'DedicatedPredictionServer', !Ref Debug ]
+        LogServer: !Ref LogServer
+        MainStack: !Ref AWS::StackName
+        NodeVolumeSize: !Ref NodeSize
+        PublicIpAddress: !Ref PublicIpAddress
+        Region: !Ref Region
+        SecurityGroupIds: !GetAtt SecurityStack.Outputs.InstanceSecurityGroup
+        SSHKey: !Ref SSHKey
+        StorageDir: !Ref StorageDir
+        SubnetId: !Ref Subnet
+        UseS3BucketBackups: !Ref UseS3BucketBackups
+        BackupDir: !Ref BackupDir
+        S3BucketBackupSchedule: !Ref S3BucketBackupSchedule
+      Tags:
+        # DataRobot tags
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-DedicatedPredictionServer
+        - Key: MainStack
+          Value: !Ref AWS::StackName
+        - Key: NodeType
+          Value: DataRobot
+        # c7n tag compliance
+        - Key: environment
+          Value: non-development
+        - Key: cost_center
+          Value: Support
+
+  ModelManagementStack:
+    Type: "AWS::CloudFormation::Stack"
+    DependsOn: IAMStack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${S3Bucket}/EC2-Create-Child-Stack.yaml"
+      Parameters:
+        DRVersion: !Ref DRVersion
+        DataVolumeSize: !Ref ModManDataSize
+        Encrypted: !Ref Encrypted
+        EncryptionKey: !Ref EncryptionKey
+        IAmProfile: !GetAtt IAMStack.Outputs.InstanceProfile
+        ImageId: !FindInMap [ OSRegionMap, !Ref 'AWS::Region', !Ref OperatingSystem ]
+        InstallationBucket: !Ref S3Bucket
+        InstanceType: !FindInMap [ InstanceTypeMap, 'ModelManagement', !Ref Debug ]
+        LogServer: !Ref LogServer
+        MainStack: !Ref AWS::StackName
+        NodeVolumeSize: !Ref NodeSize
+        PublicIpAddress: false
+        Region: !Ref Region
+        SecurityGroupIds: !GetAtt SecurityStack.Outputs.InstanceSecurityGroup
+        SSHKey: !Ref SSHKey
+        StorageDir: !Ref StorageDir
+        SubnetId: !Ref Subnet
+        TagDataVol: true
+        UseS3BucketBackups: !Ref UseS3BucketBackups
+        BackupDir: !Ref BackupDir
+        S3BucketBackupSchedule: !Ref S3BucketBackupSchedule
+      Tags:
+        # DataRobot tags
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-ModelManagement
+        - Key: MainStack
+          Value: !Ref AWS::StackName
+        - Key: NodeType
+          Value: DataRobot
+        - Key: !Ref CustomTagName
+          Value: !Ref ScheduleExpression
+        # c7n tag compliance
+        - Key: environment
+          Value: non-development
+        - Key: cost_center
+          Value: Support
+
+#  ESNode:
+#    Type: "AWS::CloudFormation::Stack"
+#    DependsOn: IAMStack
+#    Condition: NotSingleOrQuickStart
+#    Properties:
+#      TemplateURL: !Sub "https://s3.amazonaws.com/${S3Bucket}/EC2-Create-Child-Stack.yaml"
+#      Parameters:
+#        DRVersion: !Ref DRVersion
+#        DataVolumeSize: !Ref DataSize
+#        Encrypted: !Ref Encrypted
+#        EncryptionKey: !Ref EncryptionKey
+#        IAmProfile: !GetAtt IAMStack.Outputs.InstanceProfile
+#        ImageId: !FindInMap [ OSRegionMap, !Ref 'AWS::Region', !Ref OperatingSystem ]
+#        InstallationBucket: !Ref S3Bucket
+#        InstanceType: !FindInMap [ InstanceTypeMap, 'ESNode', !Ref Debug ]
+#        LogServer: !Ref LogServer
+#        MainStack: !Ref AWS::StackName
+#        NodeVolumeSize: !Ref NodeSize
+#        PublicIpAddress: false
+#        Region: !Ref Region
+#        SecurityGroupIds: !GetAtt SecurityStack.Outputs.InstanceSecurityGroup
+#        SSHKey: !Ref SSHKey
+#        StorageDir: !Ref StorageDir
+#        SubnetId: !Ref Subnet
+#        TagDataVol: true
+#        UseS3BucketBackups: !Ref UseS3BucketBackups
+#        BackupDir: !Ref BackupDir
+#        S3BucketBackupSchedule: !Ref S3BucketBackupSchedule
+#      Tags:
+        # DataRobot tags
+#        - Key: Name
+#          Value: !Sub ${AWS::StackName}-ESNode
+#        - Key: MainStack
+#          Value: !Ref AWS::StackName
+#        - Key: NodeType
+#          Value: DataRobot
+#        - Key: !Ref CustomTagName
+#          Value: !Ref ScheduleExpression
+#        # c7n tag compliance
+#        - Key: environment
+#          Value: non-development
+#        - Key: cost_center
+#          Value: Support
+
+# Configured for 4 workers each, total of 8
+  ModelingNode1Stack:
+    Type: "AWS::CloudFormation::Stack"
+    DependsOn: IAMStack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${S3Bucket}/EC2-Create-Child-Stack.yaml"
+      Parameters:
+        DRVersion: !Ref DRVersion
+        DataVolumeSize: !Ref ModelingDataSize
+        Encrypted: !Ref Encrypted
+        EncryptionKey: !Ref EncryptionKey
+        IAmProfile: !GetAtt IAMStack.Outputs.InstanceProfile
+        ImageId: !FindInMap [ OSRegionMap, !Ref 'AWS::Region', !Ref OperatingSystem ]
+        InstallationBucket: !Ref S3Bucket
+        InstanceType: !FindInMap [ InstanceTypeMap, 'ModelingNode', !Ref Debug ]
+        LogServer: !Ref LogServer
+        MainStack: !Ref AWS::StackName
+        NodeVolumeSize: !Ref NodeSize
+        PublicIpAddress: false
+        Region: !Ref Region
+        SecurityGroupIds: !GetAtt SecurityStack.Outputs.InstanceSecurityGroup
+        SSHKey: !Ref SSHKey
+        StorageDir: !Ref StorageDir
+        SubnetId: !Ref Subnet
+        UseS3BucketBackups: !Ref UseS3BucketBackups
+        BackupDir: !Ref BackupDir
+        S3BucketBackupSchedule: !Ref S3BucketBackupSchedule
+      Tags:
+        # DataRobot tags
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-ModelingNode1
+        - Key: MainStack
+          Value: !Ref AWS::StackName
+        - Key: NodeType
+          Value: DataRobot
+        # c7n tag compliance
+        - Key: environment
+          Value: non-development
+        - Key: cost_center
+          Value: Support
+
+  ModelingNode2Stack:
+    Type: "AWS::CloudFormation::Stack"
+    DependsOn: IAMStack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${S3Bucket}/EC2-Create-Child-Stack.yaml"
+      Parameters:
+        DRVersion: !Ref DRVersion
+        DataVolumeSize: !Ref ModelingDataSize
+        Encrypted: !Ref Encrypted
+        EncryptionKey: !Ref EncryptionKey
+        IAmProfile: !GetAtt IAMStack.Outputs.InstanceProfile
+        ImageId: !FindInMap [ OSRegionMap, !Ref 'AWS::Region', !Ref OperatingSystem ]
+        InstallationBucket: !Ref S3Bucket
+        InstanceType: !FindInMap [ InstanceTypeMap, 'ModelingNode', !Ref Debug ]
+        LogServer: !Ref LogServer
+        MainStack: !Ref AWS::StackName
+        NodeVolumeSize: !Ref NodeSize
+        PublicIpAddress: false
+        Region: !Ref Region
+        SecurityGroupIds: !GetAtt SecurityStack.Outputs.InstanceSecurityGroup
+        SSHKey: !Ref SSHKey
+        StorageDir: !Ref StorageDir
+        SubnetId: !Ref Subnet
+        UseS3BucketBackups: !Ref UseS3BucketBackups
+        BackupDir: !Ref BackupDir
+        S3BucketBackupSchedule: !Ref S3BucketBackupSchedule
+      Tags:
+        # DataRobot tags
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-ModelingNode2
+        - Key: MainStack
+          Value: !Ref AWS::StackName
+        - Key: NodeType
+          Value: DataRobot
+        # c7n tag compliance
+        - Key: environment
+          Value: non-development
+        - Key: cost_center
+          Value: Support
+
+# Only for PreProd or Enterprise
+# Added to allow for AutoScaling, that when used provides up to 52 total workers
+  ModelingOnlyNodeStack:
+    Type: "AWS::CloudFormation::Stack"
+    DependsOn: IAMStack
+    Properties:
+      TemplateURL: !Sub "https://s3.amazonaws.com/${S3Bucket}/EC2-Create-Child-Stack.yaml"
+      Parameters:
+        DRVersion: !Ref DRVersion
+        DataVolumeSize: !Ref ModelingDataSize
+        Encrypted: !Ref Encrypted
+        EncryptionKey: !Ref EncryptionKey
+        IAmProfile: !GetAtt IAMStack.Outputs.InstanceProfile
+        ImageId: !FindInMap [ OSRegionMap, !Ref 'AWS::Region', !Ref OperatingSystem ]
+        InstallationBucket: !Ref S3Bucket
+        InstanceType: !FindInMap [ InstanceTypeMap, 'ModelingNode', !Ref Debug ]
+        LogServer: !Ref LogServer
+        MainStack: !Ref AWS::StackName
+        NodeVolumeSize: !Ref NodeSize
+        PublicIpAddress: false
+        Region: !Ref Region
+        SecurityGroupIds: !GetAtt SecurityStack.Outputs.InstanceSecurityGroup
+        SSHKey: !Ref SSHKey
+        StorageDir: !Ref StorageDir
+        SubnetId: !Ref Subnet
+        UseS3BucketBackups: !Ref UseS3BucketBackups
+        BackupDir: !Ref BackupDir
+        S3BucketBackupSchedule: !Ref S3BucketBackupSchedule
+      Tags:
+        # DataRobot tags
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-ModelingOnlyNode
+        - Key: MainStack
+          Value: !Ref AWS::StackName
+        - Key: NodeType
+          Value: DataRobot
+        # c7n tag compliance
+        - Key: environment
+          Value: non-development
+        - Key: cost_center
+          Value: Support
+
+Outputs:
+  AutoSnapshotDeletion:
+    Condition: DeployScheduler 
+    Description: "Enable auto-delete EBS snapshots after retention period."
+    Value: !Ref AutoSnapshotDeletion
+  AllowPublicIP:
+    Description: "Allow a Public IP on the App node?"
+    Value: !Ref PublicIpAddress
+ 
+ 
+  AvailabilityMonitorURLPreProdCluster:
+    Description: "DataRobot Availability Monitor"
+    Value: !Join [ "", [ "http://", !GetAtt AppNodeStack.Outputs.PrivateIP, "/availabilitymonitor/v1/health" ] ]
+
+  BackupDir:
+    Description: "S3Bucket directory to store backup data"
+    Value: !Ref BackupDir
+
+
+  ClusterIPsQuickStartCluster:
+    Description: "List of IPs used to create the PreProd cluster"
+    Value: !Join [ " ", [ "AppNode:", !GetAtt AppNodeStack.Outputs.PrivateIP,
+     "| DataNode:", !GetAtt DataNodeStack.Outputs.PrivateIP,
+#     "| ESNode:", !GetAtt ESNode.Outputs.PrivateIP,     
+     "| ModMan:", !GetAtt ModelManagementStack.Outputs.PrivateIP,
+     "| DPE:", !GetAtt DedicatedPredictionServerStack.Outputs.PrivateIP,
+     "| Modeler1:", !GetAtt ModelingNode1Stack.Outputs.PrivateIP,
+     "| Modeler2:", !GetAtt ModelingNode2Stack.Outputs.PrivateIP,
+     "| ModelerOnly:", !GetAtt ModelingOnlyNodeStack.Outputs.PrivateIP ] ]
+
+  ClusterType:
+    Description: Type of Cluster built.
+    Value: !Ref ClusterType
+ 
+  DataRobotURLPreProd:
+    Description: "DataRobot URL"
+    Value: !Join [ "", [ "http://", !GetAtt AppNodeStack.Outputs.PrivateIP ] ]
+
+  Debug:
+    Description: Build this cluster in Debug Mode?
+    Value: !Ref Debug
+  IAMPolicyName:
+    Condition: DeployAutoScaling
+    Value: !Ref IAMPolicyName
+  KibanaURL:
+    Condition: CreateELKStack
+    Description: "Kibana URL."
+    Value: !Join [ "", [ "http://", !GetAtt ELKStack.Outputs.PrivateIP, "/elk/app/kibana" ] ]
+  LambdaConfiguration:
+    Description: "Configuration for the Lambda Functions"
+    Value: !Sub "{ \"RequestType\": \"Create\", \"StackName\": \"${AWS::StackName}\", \"SkipAMI\": \"false\" }"
+    
+  ### Start Varients
+  NodeIDsQuickStartCluster:
+    Description: "List of instance IDs in the PreProd cluster"
+    Value: !Join [ " ", [ "AppNode:", !GetAtt AppNodeStack.Outputs.InstanceId,
+     "| DataNode:", !GetAtt DataNodeStack.Outputs.InstanceId,
+#     "| ESNode:", !GetAtt ESNode.Outputs.InstanceId,
+     "| ModMan:", !GetAtt ModelManagementStack.Outputs.InstanceId,
+     "| DPE:", !GetAtt DedicatedPredictionServerStack.Outputs.InstanceId,
+     "| Modeler1:", !GetAtt ModelingNode1Stack.Outputs.InstanceId,
+     "| Modeler2:", !GetAtt ModelingNode2Stack.Outputs.InstanceId,
+     "| ModelerOnly:", !GetAtt ModelingOnlyNodeStack.Outputs.InstanceId ] ]
+  ### End Varients
+  
+  Region:
+    Description: "Where are these resources"
+    Value: !Ref Region
+  
+  S3BucketBackupSchedule:
+    Description: "Cron based backup schedule"
+    Value: !Ref S3BucketBackupSchedule
+
+  ### Varients
+  SSHConnectionStringQuickStartCluster:
+    Description: "Example SSH command, update your path as needed."
+    Value: !Join [ "", [ "ssh -i ", !Ref SSHKey, ".pem ", !FindInMap [ UserNameMap, !Ref OperatingSystem, user ], "@", !GetAtt AppNodeStack.Outputs.PrivateIP ] ]
+  
+  SecurityGroupId:
+    Description: "Generated Security Group Id"
+    Value: !GetAtt SecurityStack.Outputs.SecurityGroupId
+  ScheduleExpression:
+    Condition: DeployScheduler
+    Description: "For more, please refer to https://docs.aws.amazon.com/eventbridge/latest/userguide/scheduled-events.html"
+    Value: !Ref ScheduleExpression
+  ScheduleCustomTagName:
+    Condition: DeployScheduler
+    Description: "Custom Tag Name to scan for"
+    Value: !Ref CustomTagName
+  ScheduleRetentionPeriod:
+    Condition: DeployScheduler 
+    Description: "How many days to keep the snaphosts"
+    Value: !Ref RetentionPeriod
+  StorageType:
+    Description: How to save the data in this cluster. If using AutoScaling, you must use gluster.
+    Value: !Ref StorageType
+  Subnet:
+    Description: "Subnet to place stack's resources"
+    Value: !Ref Subnet
+  UseAutoScaling:
+    Description: "Deploy AutoScaling lambda function"
+    Value: !Ref UseAutoScaling
+  UseS3BucketBackups:
+    Description: "Use S3Bucket storage for backups?"
+    Value: !Ref UseS3BucketBackups
+  UseScheduler:
+    Description: "Deploy EBS SnapShot Scheduler lambda function"
+    Value: !Ref UseScheduler
+  AutoScaleGroup:
+    Condition: DeployAutoScaling
+    Value: !Ref AutoScaleGroup
+  AutoScaleCap:
+    Condition: DeployAutoScaling
+    Value: !Ref AutoScaleCap
+  AutoScaleMax:
+    Condition: DeployAutoScaling
+    Value: !Ref AutoScaleMax
+  AutoScaleMin:
+    Condition: DeployAutoScaling
+    Value: !Ref AutoScaleMin
+  EvaluationPeriodsAdd:
+    Condition: DeployAutoScaling
+    Value: !Ref EvaluationPeriodsAdd
+  EvaluationPeriodsRemove:
+    Condition: DeployAutoScaling
+    Value: !Ref EvaluationPeriodsRemove
+  LaunchConfigName:
+    Condition: DeployAutoScaling
+    Value: !Ref LaunchConfigName
+  MetricNamespace:
+    Condition: DeployAutoScaling
+    Value: !Ref MetricNamespace
+  PeriodAdd:
+    Condition: DeployAutoScaling
+    Value: !Ref PeriodAdd
+  PeriodRemove:
+    Condition: DeployAutoScaling
+    Value: !Ref PeriodRemove
+  RetryDelay:
+    Condition: DeployAutoScaling
+    Value: !Ref RetryDelay
+  Retries:
+    Condition: DeployAutoScaling
+    Value: !Ref Retries
+  ScaleUpAlarm:
+    Condition: DeployAutoScaling
+    Value: !Ref ScaleUpAlarm
+  ScaleDownAlarm:
+    Condition: DeployAutoScaling
+    Value: !Ref ScaleDownAlarm
+  ScaleDownPolicy:
+    Condition: DeployAutoScaling
+    Value: !Ref ScaleDownPolicy
+  ScaleUpPolicy:
+    Condition: DeployAutoScaling
+    Value: !Ref ScaleUpPolicy
+  ScalingAdjustmentAdd:
+    Condition: DeployAutoScaling
+    Value: !Ref ScalingAdjustmentAdd
+  ScalingAdjustmentRemove:
+    Condition: DeployAutoScaling
+    Value: !Ref ScalingAdjustmentRemove
+  SkipAMI:
+    Condition: DeployAutoScaling
+    Value: !Ref SkipAMI
+  ThresholdAdd:
+    Condition: DeployAutoScaling
+    Value: !Ref ThresholdAdd
+  ThresholdRemove:
+    Condition: DeployAutoScaling
+    Value: !Ref ThresholdRemove
+  WatchedMetric:
+    Condition: DeployAutoScaling
+    Value: !Ref WatchedMetric
+  WorkerImageName:
+    Condition: DeployAutoScaling
+    Value: !Ref WorkerImageName
+  WorkerName:
+    Condition: DeployAutoScaling
+    Value: !Ref WorkerName
+  WorkerType:
+    Condition: DeployAutoScaling
+    Value: !Ref WorkerType

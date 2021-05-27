@@ -1,0 +1,154 @@
+---
+###########################################################################
+#  Copyright 2020 DataRobot Inc. or its affiliates. All Rights Reserved.  #
+#                                                                         #
+#  This file is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES       #
+#  OR CONDITIONS OF ANY KIND, express or implied.                         #
+###########################################################################
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "Stand alone stacks to applying the DataRobot EBS snapshot scheduler to the given node id's"
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: System Configuration
+      Parameters:
+      - S3Bucket
+      - Instances
+      - RegionName
+      - AutoSnapshotDeletion
+      - ScheduleExpression
+      - RetentionPeriod
+      - CustomTagName
+
+Parameters:
+  Instances:
+    Type: String
+    Description: The group of instance ids to apply the EBS Snapshot functionality seperated by a comma
+    # Default: "<id #1>,<id #2>[,<id #X>]"
+  S3Bucket:
+    Type: String
+    Description: S3 Bucket for this stack
+    # Default: <Your bucket name>
+  RegionName:
+    Type: String
+    Description: Region to host cluster
+    AllowedValues: [ "ap-south-1", "eu-west-1", "eu-west-2", "eu-west-3", "eu-north-1", "ap-northeast-1", "ap-northeast-2", "sa-east-1", "ca-central-1", "ap-southeast-1", "ap-southeast-2", "eu-central-1", "us-east-1", "us-east-2", "us-west-1", "us-west-2" ]
+    Default: us-east-1
+  ScheduleExpression:
+    Type: String
+    Description: "Expression used for the timing of the schedule. For more, please refer to https://docs.aws.amazon.com/eventbridge/latest/userguide/scheduled-events.html"
+    Default: "cron(0 0 ? * MON-FRI *)" # Run at midnight UTC, Monday - Friday, could also use "cron(0/10 * * * ? *)" or "rate(10 minutes)"" to run it every 10 minutes for testing
+  CustomTagName:
+    Type: String
+    Description: Custom Tag Name
+    Default: scheduler:ebs-snapshot
+  RetentionPeriod:
+    Type: Number
+    Description: how many days to keep the snaphosts
+    Default: 5
+  AutoSnapshotDeletion:
+    Type: String
+    Description: Enable auto-delete EBS snapshots after retention period.
+    Default: 'Yes'
+    AllowedValues: [ 'Yes', 'No' ]
+
+Resources:
+
+  EBSSnapSchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: ebaSnapSchedulerPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:log-group:/aws/lambda/*
+          - Effect: Allow
+            Action:
+            - ec2:CreateSnapshot
+            - ec2:CreateTags
+            - ec2:DeleteSnapshot
+            - ec2:DescribeSnapshots
+            - ec2:DescribeTags
+            - ec2:DescribeRegions
+            - ec2:DescribeVolumes
+            - ec2:DescribeInstances
+            - cloudformation:DescribeStacks
+            Resource: "*"
+
+  EBSSnapShotLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: EBS-SnapShot-Scheduler.lambda_handler
+      Role: !GetAtt EBSSnapSchedulerRole.Arn
+      Description: Stand-alone EBS Snapshot Generater Lambda function to manually take snapshots of the DataRobot EBS volume.
+      Code:
+        S3Bucket: !Ref S3Bucket
+        S3Key: "Scheduler/EBS-SnapShot-Scheduler.zip"
+      Runtime: python3.7
+      Timeout: '300'
+
+  EBSBackupScheduledRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: "Rule to trigger the EBS SnapShot Backup lambda function on a schedule"
+      ScheduleExpression: !Ref ScheduleExpression
+      State: "ENABLED"
+      Targets:
+      - Arn: !GetAtt EBSSnapShotLambda.Arn
+        Id: "EBSBackupScheduleV1"
+
+  PermissionForEventsToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref EBSSnapShotLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt EBSBackupScheduledRule.Arn
+
+
+Outputs:
+  # Scheduler Config
+  AutoDelete:
+    Description: "Enable auto-delete EBS snapshots after retention period"
+    Value: !Ref AutoSnapshotDeletion
+  ScheduleExpression:
+    Description: "For more, please refer to https://docs.aws.amazon.com/eventbridge/latest/userguide/scheduled-events.html"
+    Value: !Ref ScheduleExpression
+  CustomTagName:
+    Description: "Custom Tag Name to scan for"
+    Value: !Ref CustomTagName
+  RetentionPeriod:
+    Description: "How many days to keep the snaphosts"
+    Value: !Ref RetentionPeriod
+  RegionName:
+    Description: "Where to place these resources"
+    Value: !Ref RegionName
+  ConfigureProvisionEvent:
+    Description: "Configuration for a Create event"
+    Value: !Sub "{ \"RequestType\": \"Provision\", \"StackName\": \"${AWS::StackName}\" }"
+  ConfigureCreateEvent:
+    Description: "Configuration for a Create event"
+    Value: !Sub "{ \"RequestType\": \"Create\", \"StackName\": \"${AWS::StackName}\" }"
+  StackName:
+    Description: Nme of the stack that build this
+    Value: !Sub ${AWS::StackName}
+  InstanceList:
+    Description: Nme of the stack that build this
+    Value: !Ref Instances

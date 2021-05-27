@@ -1,0 +1,229 @@
+---
+# This example configuration should be used for deploying
+# A Pre-Production / UAT configuration of DataRobot 6.3.3
+#
+# This configuration contains:
+#   * 1 Application node
+#   * 1 Data node
+#   * 1 ElasticSearch and Mongo Connector node
+#   * 2 Modeling and EDA nodes
+#   * 1 Modeling only node
+#   * 1 Model Management node
+#   * 1 Dedicated Prediction node
+
+os_configuration:
+  # DataRobot service user and keys
+  user: datarobot
+  group: datarobot
+  private_ssh_key_path: /home/datarobot/.ssh/id_rsa
+
+  # Directory for storing all DataRobot configuration and data files
+  datarobot_home_dir: /opt/datarobot
+
+  # Use the DataRobot python and ansible
+  use_embedded_python: true
+
+  # Web server configuration
+  # Raw, proxy, or load balancer URL that will be used to reach the web server
+  webserver_hostname: AppNode
+  ssl:
+    enabled: false # Set to false if you will not use SSL certificates
+    # Paths relative to certs/ directory on installer node
+    cert_file_name: cert.pem
+    key_file_name: cert.key
+
+  # Prediction server configuration (optional)
+  prediction_endpoint: DedicatedPredictionServer
+  prediction_ssl:
+    enabled: false # Set to false if you will not use SSL certificates
+    # Paths relative to certs/ directory
+    cert_file_name: pcert.pem
+    key_file_name: pcert.key
+
+  # Enable authenticated access to backend databases (required for minio)
+  secrets_enforced: SecretsEnforced
+
+  # Configure endpoint to send JSON-formatted logs
+  logs:
+    enabled: Use_Log_Server
+    server: ELKNode
+    port: 5544 # protocol will be UDP
+    #filebeat: true
+    ## add to app node
+    # - logtailer
+
+# Global application configuration settings
+app_configuration:
+  EDA_WORKERS: 1 # EDA worker processes per execmanager container
+  SECURE_WORKER_FIT_WORKERS: 4 # Modeling worker processes per execmanager container
+  PREDICTION_API_WORKERS: 1
+
+# Global application configuration settings
+  drenv_override:
+    # SSL and SELinux settings
+    PUBLIC_API_GUNICORN_WORKERS: 8
+    ALLOW_SELF_SIGNED_CERTS: true # set to true to disable SSL verification internally
+    VERIFY_SSL: false
+    ### Using SELINUX on quickstart for reduced security liability
+    ENABLE_SELINUX: true # set to true if SELinux is Enforcing on your cluster
+    ENABLE_ENHANCED_LICENSE: true # turn on license pretty print.
+
+    # JDBC config
+    ENABLE_DATA_MANAGEMENT_FOR_ALL_USERS: true
+    ENABLE_SAFER_API: true
+    ENABLE_IMPROVED_JDBC: true
+    ENABLE_CREDENTIAL_STORAGE_FOR_ALL_USERS: true
+
+    # License v4, overridden in the actual License
+    DATAROBOT_PRIME_SERVICE: true
+    ENABLE_CODE_GENERATION: true
+    ENABLE_CODE_GENERATION_SYSTEMWIDE: true
+    ENABLE_COMPLIANCE_DOCUMENTATION: true
+    ENABLE_CUSTOM_MODEL_DEPENDENCY_MANAGEMENT: true
+    ENABLE_HUMBLE_AI: true
+    ENABLE_MLOPS: true
+    ENABLE_MMM_MODEL_PACKAGE_EXPORT: true
+    ENABLE_MMM_MODEL_PACKAGE_IMPORT: true
+    ENABLE_MODEL_DEPLOYMENTS: true
+    GRAYBOX_DISABLED: true
+    ORDINARY_REGRESSION_CLASSIFICATION_AVAILABLE: true
+    PREDICTION_API_MONITOR_RAW_MAX_FEATURES: 25
+    TIME_SERIES_AVAILABLE: true
+
+    # S3 data ingest configuration
+    ENABLE_S3_INGESTION: true
+    S3_HOST: s3.Region.amazonaws.com
+    S3_REGION: Region
+
+    # AWS Storage settings
+    #AWSS3 FILE_STORAGE_TYPE: s3
+    #AWSS3 FILE_STORAGE_PREFIX: StorageDir/
+    #AWSS3 S3_BUCKET: S3Bucket
+    #AWSS3 S3_CALLING_FORMAT: OrdinaryCallingFormat
+    #AWSS3 S3_PORT: 443
+    #AWSS3 S3_IS_SECURE: true
+    #AWSS3 MULTI_PART_S3_UPLOAD: false
+    #AWSS3 S3_SIGNATURE_VERSION: s3v4
+
+    # Metrics Publisher required parameters
+    # METRICS_PUBLISHER_CLOUD_PROVIDER: aws
+
+    # Metrics Publisher Namespace
+    # By default it should look something like:
+    # STATS_METRICS_NAMESPACE: DataRobot/AutoScaling/CLUSTEROWNERTest
+    # STATS_METRICS_NAMESPACE: METRICNAMESPACE
+
+    # When using LDAP, you must include the following setting
+    #USER_AUTH_SERVICE_USERNAMES: localadmin@datarobot.com,admin@datarobot.com
+
+# Service layout
+# List of dictionaries with several keys:
+#   services: list of services to run
+#   hosts: list of hosts to run these services on.
+#          do not list one host in multiple dictionaries
+#   app_configuration: override global app_configuration for these hosts
+servers:
+# Application node
+- services:
+  - analyticsbrokeringest
+  - analyticsbrokerpublisher
+  - app
+  - appupload
+  - availabilitymonitor
+  - datasetsserviceapi
+  - internalapi
+  - mmqueue
+  - nginx
+  - notificationsbroker
+  - pngexport
+  - provisioner
+  - publicapi
+  - rabbit
+  - rsyslog
+  - tableauextension
+  - taskmanager
+  - tileservergl
+  # Added for autoscaling
+  # - metricspublisher
+  hosts:
+  - AppNode
+  # app_configuration:
+  #   drenv_override:
+  #     # Used to redirect an app node request
+  #     EXTERNAL_WEB_SERVER_URL: https://appdatarobot.customer.com
+  #     EXTERNAL_WEB_SERVER_URL_FORCED: true
+  #     # Configure email settings for application support integration (optional)
+  #     SMTP_ADDRESS: smtp.gmail.com
+  #     SMTP_MODE: SMTP_STARTTLS
+  #     SMTP_PASSWORD: <SMTP_PASSWORD>
+  #     SMTP_PORT: 587
+  #     SMTP_USER: megaphone@customer-domain.com
+  #     DEFAULT_SENDER: someemailaddress@yourdomain.com  # Email address shown in your email app.
+  #     DEFAULT_SUPPORT: someemailaddress@yourdomain.com # Email address shown with in the text of the email.
+
+# Data node
+- services:
+  # - minio
+  # - gluster
+  - mongo
+  - redis
+  - elasticsearch  # moved off esnode
+  hosts:
+  - DataNode
+
+#AI Catalog node
+#- services:
+#  - elasticsearch
+#  hosts:
+#  - ESNode  
+
+# Modeling node(s)
+- services:
+  - execmanager
+  - resourcemonitor
+  # repeat this pattern to add up to eight workers of each type
+  - datasetsserviceworker0
+  - datasetsservicequickworker0
+  - datasetsserviceworker1
+  - datasetsservicequickworker1
+  hosts:
+  - ModelingNode1
+  - ModelingNode2
+
+# Modeling-only servers
+- services:
+  - execmanagersw
+  - resourcemonitor
+  hosts:
+  - ModelingOnlyNode
+
+# Model Management node (optional)
+- services:
+  - pgsql
+  - modmonworker
+  - modmonscheduler
+  hosts:
+  - ModelManagement
+  app_configuration:
+    drenv_override:
+      # Models to cache in Modmon memory at once. Tune this for your use case.
+      # Keep less or equal to WORKER_MODEL_CACHE configuration on dedicated prediction server.
+      MMM_PREDICTIONS_DATA_MODEL_LOADER_CACHE_SIZE: 4
+
+# Dedicated high-performance prediction server (optional)
+- services:
+  - dedicatedpredictionapi
+  - dedicatedpredictionnginx
+  - modmonrsyslogmaster
+  - predictionspooler
+  hosts:
+  - DedicatedPredictionServer
+  app_configuration:
+    # Recommended configuration for dedicated prediction server
+    dedicated_prediction_server: true
+    drenv_override:
+      WORKER_MODEL_CACHE: 16 # Models to cache in memory at once. Tune this for your use case
+      MODEL_CACHE_MODE: LRU # Mode for caching models. Options: LRU, latest
+      # # Override prediction_endpoint so that end users know how to hit the external URL of the DPE
+      # PREDICTION_API_ENDPOINT: dpe-datarobot.customer.com
+      # PREDICTION_SSL_ENABLED: true

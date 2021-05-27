@@ -1,0 +1,95 @@
+###########################################################################
+#  Copyright 2020 DataRobot Inc. All Rights Reserved.                     #
+#                                                                         #
+#  This file is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES       #
+#  OR CONDITIONS OF ANY KIND, express or implied.                         #
+###########################################################################
+
+AWSTemplateFormatVersion: 2010-09-09
+Description: Datarobot autoscaling stack Lambda function
+
+Parameters:
+  S3Bucket:
+    Type: String
+    Description: S3 bucket to store the artifacts
+
+Resources:
+
+  AutoScalingLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: AutoScaling.lambda_handler
+      Role: !GetAtt AutoScalingRole.Arn
+      Description: Lambda function to build out the AutoScaling functionality.
+      Code:
+        S3Bucket: !Ref S3Bucket
+        S3Key: "AutoScaling/AutoScaling.zip"
+      Runtime: python3.7
+      Timeout: 900
+
+  AutoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal: {Service: [lambda.amazonaws.com]}
+          Action: ['sts:AssumeRole']
+      Path: /
+      ManagedPolicyArns:
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      - arn:aws:iam::aws:policy/service-role/AWSLambdaRole
+      Policies:
+      - PolicyName: DataRobot-LambdaFunctionPolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - autoscaling:CreateAutoScalingGroup
+            - autoscaling:CreateLaunchConfiguration
+            - autoscaling:CreateOrUpdateTags
+            - autoscaling:DeleteAutoScalingGroup
+            - autoscaling:DeleteLaunchConfiguration
+            - autoscaling:DeletePolicy
+            - autoscaling:PutScalingPolicy
+            - cloudwatch:DeleteAlarms
+            - cloudwatch:PutMetricAlarm
+            - ec2:StartInstances
+            - ec2:StopInstances
+            - iam:CreatePolicy
+            - iam:GetInstanceProfile
+            - iam:AttachRolePolicy
+            Resource:
+            - arn:aws:ec2:*:*:instance/*
+            - arn:aws:cloudwatch:*:*:alarm:*
+            - arn:aws:autoscaling:*:*:autoScalingGroup:*:autoScalingGroupName/*
+            - arn:aws:autoscaling:*:*:launchConfiguration:*:launchConfigurationName/*
+            - arn:aws:iam::*:policy/*
+            - arn:aws:iam::*:instance-profile/*
+            - arn:aws:iam::*:role/*
+          - Effect: Allow
+            Action:
+            - cloudformation:DescribeStacks
+            - ec2:DescribeImages
+            - ec2:DeregisterImage
+            - ec2:DescribeInstances
+            - ec2:CreateImage
+            Resource: "*"
+          - Effect: Allow
+            Action:
+            - iam:PassRole
+            - iam:DeleteRolePolicy
+            Resource: arn:aws:iam::*:role/*
+
+Outputs:
+  AutoScalingLambda:
+    Value: !Ref AutoScalingLambda
+
+  AutoScalingLambdaARN:
+    Description: AutoScalingLambda arn used for the rules
+    Value: !GetAtt AutoScalingLambda.Arn
+
+  AutoScalingRole:
+    Value: !Ref AutoScalingRole

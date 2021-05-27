@@ -1,0 +1,187 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: DataRobot CloudFormation Stack to Create Application Load Balancer for the 3 given servers
+
+Metadata: 
+  AWS::CloudFormation::Interface: 
+    ParameterGroups: 
+      - 
+        Label: 
+          default: Network Settings
+        Parameters:
+          - VpcId
+          - SecurityGroupIds
+          - Subnet1
+          - Host1
+          - Subnet2
+          - Host2
+          - Subnet3          
+          - Host3
+      - 
+        Label: 
+          default: Application Load Balancer Configuration
+        Parameters:
+          - LoadBalancerName
+          - TargetGroupName
+          - Scheme
+          - Protocol
+          - Path
+          - Duration
+          - HealthCheckTimeoutSeconds
+          - HealthyThresholdCount
+          - UnhealthyThresholdCount
+
+Parameters:
+  LoadBalancerName:
+    Type: String
+    Description: Name of the DataRobot Load Balancer
+    Default: DataRobot-DPE-LoadBalancer
+  Path:
+    Type: String
+    Description: Health Check URI path
+    Default: /predApi/v1.0/ping
+  Duration:
+    Type: Number
+    Description: Hint wait time in seconds
+    Default: 30
+  Subnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet 1 ID
+    # Default: subnet-<some subnet id>  
+  Subnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet 2 ID
+    # Default: subnet-<some subnet id>
+  Subnet3:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet 3 ID
+    # Default: subnet-<some subnet id>
+  Scheme:
+    Type: String
+    Description: Load Balancer Schema type
+    AllowedValues: [ "internal", "internet-facing" ]
+    Default: "internal"
+  Protocol:
+    Type: String
+    Description: Connection protocol 
+    AllowedValues: [ "HTTP" ] # , "HTTPS"
+    Default: "HTTP"
+  TargetGroupName:
+    Type: String
+    Description: Target group name
+    Default: DataRobot-DPE-LB-Group
+  HealthCheckTimeoutSeconds:
+    Type: Number
+    #Description: Hint wait time in seconds
+    Default: 5
+  HealthyThresholdCount:
+    Type: Number
+    Description: Number of successful hits to be considered healthy
+    Default: 10
+  UnhealthyThresholdCount:
+    Type: Number
+    Description: Number of un-successful hits to be considered not healthy
+    Default: 2
+  Host1:
+    Type: AWS::EC2::Instance::Id
+    Description: Instance Id of DPE Host1
+    # Default: i-<some instance id>
+  Host2:
+    Type: AWS::EC2::Instance::Id
+    Description: Instance Id of DPE Host2
+    # Default: i-<some instance id>
+  Host3:
+    Type: AWS::EC2::Instance::Id
+    Description: Instance Id of DPE Host3
+    # Default: i-<some instance id>
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Virtual Private Cloud Id
+    #Default: vpc-<some vpc id>
+  SecurityGroupIds:
+    Type: String
+    Description: Security Group Id for the referenced DPEs
+    # Default: sg-<some security group>
+
+Mappings:
+  # Protocol to port mapping
+  ProtocolMap:
+    HTTP:
+      port: "80"
+    HTTPS:
+      port: "443"
+
+Resources:
+
+  DPELoadBalancer:
+    Type: "AWS::ElasticLoadBalancingV2::LoadBalancer"
+    Properties:
+      IpAddressType: "ipv4"
+      Name: !Ref LoadBalancerName
+      Scheme: !Ref Scheme
+      SecurityGroups:
+        - !Ref SecurityGroupIds
+      Subnets:
+        - !Ref Subnet1
+        - !Ref Subnet2
+        - !Ref Subnet3
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-DPE-LoadBalancer
+        - Key: NodeType
+          Value: DataRobot
+      Type: "application"  
+
+  DPETargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Ref TargetGroupName
+      VpcId: !Ref VpcId
+      Protocol: !Ref Protocol
+      Port: !FindInMap [ ProtocolMap, !Ref Protocol, port ]
+      TargetType: "instance"
+      HealthCheckProtocol: !Ref Protocol
+      HealthCheckIntervalSeconds: !Ref Duration
+      HealthCheckTimeoutSeconds: !Ref HealthCheckTimeoutSeconds
+      HealthyThresholdCount: !Ref HealthyThresholdCount
+      UnhealthyThresholdCount: !Ref UnhealthyThresholdCount
+      HealthCheckPath: !Ref Path
+      Targets:
+        - Id: !Ref Host1
+        - Id: !Ref Host2
+        - Id: !Ref Host3
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-DPE-TargetGroup
+        - Key: NodeType
+          Value: DataRobot
+
+  LoadBalancerListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    # DependsOn:
+    #   - LoadBalancer
+    #   - TargetGroup
+    Properties:
+     LoadBalancerArn: !Ref DPELoadBalancer
+     Port: !FindInMap [ ProtocolMap, !Ref Protocol, port ]
+     Protocol: !Ref Protocol
+     DefaultActions:
+       - TargetGroupArn: !Ref DPETargetGroup
+         Type: 'forward'
+
+Outputs:
+  ClusterIPs:
+    Description: "Configured DPE set"
+    Value: !Join [ " ", [ "DPE1:", !Ref Host1, "| DPE2:", !Ref Host2, "| DPE3:", !Ref Host3 ] ]
+  DPELoadBalancerARN:
+    Description: "ARN of the DPE Load Balancer"
+    Value: !Ref DPELoadBalancer
+  DPELoadBalancerDNSName:
+    Description: DNS Name of this load balancer
+    Value: !GetAtt DPELoadBalancer.DNSName
+  DPELoadBalancerTargetGroupARN:
+    Description: Dedicated Prediction Engine Target Group ID
+    Value: !Ref DPETargetGroup
+  DPELoadBalancerName:
+    Description: DNS Name of this load balancer
+    Value: !GetAtt DPELoadBalancer.LoadBalancerName
+

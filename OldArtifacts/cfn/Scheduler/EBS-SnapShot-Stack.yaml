@@ -1,0 +1,101 @@
+###########################################################################
+#  Copyright 2020 DataRobot Inc. All Rights Reserved.                     #
+#                                                                         #
+#  This file is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES       #
+#  OR CONDITIONS OF ANY KIND, express or implied.                         #
+###########################################################################
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: DataRobot EBS SnapShot Stack, used to manage the snap shots for this cluster
+
+Parameters:
+  S3Bucket:
+    Type: String
+    Description: CloudFormation repository S3 bucket name
+  ScheduleExpression:
+    Type: String
+    Description: "Expression used for the timing of the schedule. For more, please refer to https://docs.aws.amazon.com/eventbridge/latest/userguide/scheduled-events.html"
+    Default: "cron(0 0 ? * MON-FRI *)" # Run at midnight UTC, Monday - Friday, could also use "cron(0/10 * * * ? *)" or "rate(10 minutes)"" to run it every 10 minutes for testing
+
+Resources:
+
+  EBSSnapSchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action: sts:AssumeRole
+      Path: "/"
+      Policies:
+      - PolicyName: ebaSnapSchedulerPermissions
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+            Resource: arn:aws:logs:*:*:log-group:/aws/lambda/*
+          - Effect: Allow
+            Action:
+            - cloudformation:DescribeStacks
+            - ec2:CreateSnapshot
+            - ec2:CreateTags
+            - ec2:DeleteSnapshot
+            - ec2:DescribeSnapshots
+            - ec2:DescribeTags
+            - ec2:DescribeRegions
+            - ec2:DescribeVolumes
+            - ec2:DescribeInstances
+            - events:PutRule 
+            Resource: "*"
+
+  EBSSnapShotLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: EBS-SnapShot-Scheduler.lambda_handler
+      Role: !GetAtt EBSSnapSchedulerRole.Arn
+      Description: EBS Snapshot Generater Lambda function to manually take snapshots of the DataRobot EBS volume.
+      Code:
+        S3Bucket: !Ref S3Bucket
+        S3Key: "Scheduler/EBS-SnapShot-Scheduler.zip"
+      Runtime: python3.7
+      Timeout: '300'
+
+  EBSBackupScheduledRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: "Rule to trigger the EBS SnapShot Backup lambda function on a schedule"
+      ScheduleExpression: !Ref ScheduleExpression
+      State: "ENABLED"
+      Targets:
+      - Arn: !GetAtt EBSSnapShotLambda.Arn
+        Id: "EBSBackupScheduleV1"
+
+  PermissionForEventsToInvokeLambda:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref EBSSnapShotLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt EBSBackupScheduledRule.Arn
+
+Outputs:
+
+  EBSSnapShotLambdaARN:
+    Description: EBSSnapShotLambda arn used for the rules
+    Value: !GetAtt EBSSnapShotLambda.Arn
+  EBSSnapShotLambda:
+    Description: EBSSnapShotLambda 
+    Value: !Ref EBSSnapShotLambda
+  EBSBackupScheduledRuleArn:
+    Description: EBSBackupScheduledRule Arn 
+    Value: !GetAtt EBSBackupScheduledRule.Arn
+  EBSBackupScheduledRule:
+    Description: EBSBackupScheduledRule 
+    Value: !Ref EBSBackupScheduledRule

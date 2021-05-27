@@ -1,0 +1,524 @@
+###########################################################################
+#  Copyright 2020 DataRobot Inc. All Rights Reserved.                     #
+#                                                                         #
+#  This file is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES       #
+#  OR CONDITIONS OF ANY KIND, express or implied.                         #
+###########################################################################
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: DataRobot CloudFormation stack to create the child EC2 instances of the cluster
+Parameters:
+  MainStack:
+    Type: String
+  DRVersion:
+    Type: String
+    Description: DataRobot version to install
+    AllowedPattern: '(\d{1,3})\.(\d{1,3})\.(\d{1,3})'
+    Default: 7.0.2
+  InstallationBucket:
+    Type: String
+    Description: CloudFormation repository S3 bucket name
+  SSHKey:
+    Type: "AWS::EC2::KeyPair::KeyName"
+    Description: Key pair to use for connectivity
+  SubnetId:
+    Type: "AWS::EC2::Subnet::Id"
+    Description: Subnet for cluster
+  SecurityGroupIds:
+    Type: List<AWS::EC2::SecurityGroup::Id>
+    Description: Cluster Security Group Id
+    # Default: sg-<some securitygroup id>
+  ImageId:
+    Type: AWS::EC2::Image::Id
+    Description: RHEL or CentOS AMI Id
+  InstanceType:
+    Type: String
+    Description: AWS Instance Type
+    AllowedValues: [ "t3.2xlarge", "m5.xlarge", "m5.2xlarge", "c5.xlarge", "c5.2xlarge", "r5.xlarge", "r5.2xlarge", "r5.4xlarge", "r5d.12xlarge" ]
+  NodeVolumeSize:
+    Type: Number
+    Description: Hard drive size for Operating System
+    AllowedValues: [ 40, 60, 80, 100 ]
+    # Default: 40
+  Region:
+    Type: String
+    Description: Region to host cluster
+    AllowedValues: [ "ap-south-1", "eu-west-1", "eu-west-2", "eu-west-3", "eu-north-1", "ap-northeast-1", "ap-northeast-2", "sa-east-1", "ca-central-1", "ap-southeast-1", "ap-southeast-2", "eu-central-1", "us-east-1", "us-east-2", "us-west-1", "us-west-2" ]
+    Default: us-east-1
+  Encrypted:
+    Type: String
+    Description: Enable encryption on the DataRobot Application Drive
+    Default: true
+    AllowedValues: [ true, false ]
+  EncryptionKey:
+    Type: String
+    Description: AWS KMS key used to encrypt the DataRobot App drive at /opt/datarobot
+    # Default: <some encryption key value>
+  PublicIpAddress:
+    Type: String
+    Description: Should this node have a Public IP
+    Default: false
+    AllowedValues: [ true, false ]
+  IAmProfile:
+    Type: String
+    Description: Profile ID for the IAM Role we will be using
+    Default: ""
+  StorageDir:
+    Type: String
+    Description: Where to store the verte4x files in our S3 bucket
+    Default: "datarobot_storage"
+  LogServer:
+    Type: String
+    Description: Type of Log Aggrigation Server to configure. Current options are off or Elastic/Logstacsh/Kibana. Splunk is on the way.
+    AllowedValues: [ off, ELK ]
+    Default: off
+  DataVolumeSize:
+    Type: Number
+    Description: Hard drive size for the DataRobot software
+    AllowedValues: [ 128, 256, 512, 1024, 2048, 4096 ]
+  TagDataVol:
+    Type: String
+    Description: Tag the data volume on this node for snapshotting
+    Default: false
+    AllowedValues: [ true, false ]
+
+  BackupDir:
+    Type: String
+    Description: Where to store the secrets and data file backups
+    Default: "backup_files"
+
+  UseS3BucketBackups:
+    Type: String
+    Description: Where to store the secrets and data file backups
+    Default: true
+    AllowedValues: [ true, false ]
+
+  S3BucketBackupSchedule:
+    Type: String
+    Description: "Cron tab formatted schedule. Default: '0 0 * * 1-5' or Monday - Friday at midnight"
+    Default: "0 0 * * 1-5"
+    # Default: "30 * * * *"
+
+Conditions:
+  UseKey: !And
+    - !Equals [!Ref Encrypted, true]
+    - !Not [!Equals [!Ref EncryptionKey, ""]]
+
+Resources:
+  EC2Instance:
+    Type: "AWS::EC2::Instance"
+    Metadata: 
+      AWS::CloudFormation::Init: 
+        config:
+          packages:
+            rpm:
+              epel: "https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm"
+            yum:
+              #awscli: []
+              unzip: []
+          groups: 
+            docker: {}
+          files:
+            # Give the datarobot user sudo access
+            /etc/sudoers.d/datarobot:
+              content: !Sub |
+                datarobot ALL=(ALL) NOPASSWD: ALL
+              mode: "000644"
+              owner: "root"
+              group: "root"
+            # Set max open files and lock memory
+            /etc/security/limits.d/20-nproc.conf:
+              content: !Sub |
+                # Default limit for number of user's processes to prevent
+                # accidental fork bombs.
+                # See rhbz #432903 for reasoning.
+
+                *          soft    nproc     4096
+                root       soft    nproc     unlimited
+                datarobot  hard    nproc     32768
+                datarobot  soft    nproc     32768
+                datarobot  -       memlock   unlimited
+                datarobot  -       nofile    65536
+                datarobot  -       nproc     32768
+              mode: "000644"
+              owner: "root"
+              group: "root"
+            # Set this Docker service parameters to avoid 'Out of Memory' and 'Too Many Open Files' errors.
+            /etc/systemd/system/docker.service.d/1-datarobot.conf:
+              content: !Sub |
+                [Service]
+                LimitMEMLOCK=infinity
+                LimitNOFILE=65536
+                Restart=on-failure
+
+              mode: "000644"
+              owner: "root"
+              group: "root"
+
+            # Disable IPv6 in the config
+            /etc/sysctl.d/70-ipv6.conf:
+              content: !Sub |
+                net.ipv6.conf.all.disable_ipv6 = 1
+                net.ipv6.conf.default.disable_ipv6 = 1
+              mode: "000644"
+              owner: "root"
+              group: "root"
+
+          commands:
+            0a-PackageInstallation:
+              command: !Sub |
+
+
+
+                echo "Installing the AWS cli v2"
+                curl --silent --output /tmp/awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip"
+                unzip /tmp/awscliv2.zip -d /tmp
+                sudo /tmp/aws/install
+
+              ignoreErrors: "false"
+                          
+            # 0a-PackageInstallation:
+            #   command: !Sub |
+
+            #     # Install python pip
+            #     yum install -y python-pip
+
+            #     # Install or Upgrade the required python packages
+            #     pip install --upgrade pip awscli future boto3 argparse requests
+
+            0b-TurnOffIPv6:
+              command: !Sub |
+
+                # Force new line in the log
+                echo " "
+
+                echo "removing ::1 from /etc/hosts "
+                sed -i --follow-symlinks 's/::1/#::1/' /etc/hosts
+
+                echo "Loading IPv6 networking config"
+                sysctl --load /etc/sysctl.d/70-ipv6.conf
+
+                echo "You should see 1's"
+                sysctl --all | grep disable_ipv6
+
+              test: test -s /etc/sysctl.d/70-ipv6.conf
+              ignoreErrors: "false"
+
+            1a-CreateDataRobotUser:
+              command: !Sub |
+
+                # Force new line in the log
+                echo " "
+
+                # Provision the datarobot user
+                useradd --create-home -u 1234 datarobot
+                usermod -aG docker datarobot
+
+                echo "Created datarobot user:> $(id datarobot)"
+                echo "max open files :> $(/usr/sbin/runuser -l datarobot -c 'ulimit -n')"
+                echo "max locked memory:> $(/usr/sbin/runuser -l datarobot -c 'ulimit -l')"
+                echo "max user processes:> $(/usr/sbin/runuser -l datarobot -c 'ulimit -u')"
+
+              # Confirm datarobot does not exist
+              test: test ! $(getent passwd datarobot) > /dev/null 2>&1
+              ignoreErrors: "false"
+
+            1b-GenerateKeys:
+              command: !Sub |
+
+                # Force new line in the log
+                echo " "
+
+                # Generate SSH Keys
+                /usr/sbin/runuser -l datarobot -c 'ssh-keygen -t rsa -b 2048 -f /home/datarobot/.ssh/id_rsa -N ""'
+
+                # Copy Public Key to authorized_keys
+                /usr/sbin/runuser -l datarobot -c 'cat /home/datarobot/.ssh/id_rsa.pub | tee -a /home/datarobot/.ssh/authorized_keys'
+
+                # Chmod authorized_keys
+                /usr/sbin/runuser -l datarobot -c 'chmod 600 /home/datarobot/.ssh/authorized_keys'
+
+                # Make sure the node can talk to it self
+                echo -n "Ensuring node can talk to it self:>"
+                /usr/sbin/runuser -l datarobot -c "ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR $(curl --silent http://169.254.169.254/latest/meta-data/local-ipv4) date"
+
+              test: test ! -s /home/datarobot/.ssh/id_rsa
+              ignoreErrors: "false"
+              env:
+                AWS_REGION: !Ref Region
+                MAIN_STACK: !Ref MainStack
+
+            2a-SetSELinux:
+              command: !Sub |
+                # do not disable SELINUX for quickstart branch
+                # Force new line in the log
+                # echo " "
+
+                # Set SELinux to Permissive
+                # sed -i --follow-symlinks 's/SELINUX=enforcing/SELINUX=permissive/' /etc/sysconfig/selinux
+                # setenforce 0
+                # echo "SELinux :> $(getenforce)"
+
+              # Confirm SELinux = Permissive
+              # test: "test $(getenforce) = 'Enforcing'"
+              ignoreErrors: "true"
+            
+            2b-ConfigureSSL:
+              command: !Sub |
+
+                # Force new line in the log
+                echo " "
+
+                # Configure SSL and re-start the service
+                sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+                sed -i 's/#RSAAuthentication yes/RSAAuthentication yes/' /etc/ssh/sshd_config
+                systemctl restart sshd
+                echo "Restarted sshd"
+
+              test: "grep '#PubkeyAuthentication yes' /etc/ssh/sshd_config"
+              ignoreErrors: "false"
+
+            2c-MountFileSystem:
+              command: !Sub |
+
+                # Force new line in the log
+                echo " "
+
+                # Apply EXT4 File System to the new volume
+                /usr/sbin/mkfs -t ext4 /dev/nvme1n1
+
+                # Make the directory and mount the volume
+                mkdir -p /opt/datarobot
+                
+                # Add entry into the fstab
+                echo "$(file -s /dev/nvme1n1 | cut -f 8 -d ' ') /opt/datarobot ext4 defaults,nofail 0 0" | tee -a /etc/fstab
+
+                # Mount the volume
+                mount -a
+
+              test: "lsblk | grep nvme1n1 | cut -d ' ' -f 16"
+              ignoreErrors: "false"
+
+            2d-MakeDockerDirectory:
+              command: !Sub |
+
+                # Force new line in the log
+                echo " "
+
+                mkdir -p /opt/datarobot/docker
+                echo "Made Directory :> /opt/datarobot/docker"
+
+                # Create the docker symlink
+                ln -s /opt/datarobot/docker /var/lib/docker
+                chown -h datarobot:datarobot /var/lib/docker
+                chown -R datarobot:datarobot /opt/datarobot
+                echo "Created Symlink :> $(ls -al /var/lib/docker)"
+
+              ignoreErrors: "false"
+              test: test ! -L /var/lib/docker      
+
+            3-PlacePublicKey:
+              command: !Sub |
+
+                # Force new line in the log
+                echo " "
+
+                # Wait for the key and save it when ready
+                param=$(aws ssm describe-parameters --region $AWS_REGION --query "Parameters[].Name" --output text --filters "Key=Name,Values=/$MAIN_STACK/datarobot-public-key")
+
+                while [ ! -n "$param" ]; do
+                  sleep 10
+                  echo "Waiting 5 seconds for the key to arrive"
+                  param=$(aws ssm describe-parameters --region $AWS_REGION --query "Parameters[].Name" --output text --filters "Key=Name,Values=/$MAIN_STACK/datarobot-public-key")
+                done
+
+                # Get the /$MAIN_STACK/datarobot-public-key
+                key=$(aws ssm get-parameter --name "/$MAIN_STACK/datarobot-public-key" --region $AWS_REGION --query 'Parameter.Value' | cut -d "\"" -f2)
+
+                # Append the public key to the auth keys file
+                echo "$key" | tee -a /home/datarobot/.ssh/authorized_keys
+                echo "Saved to /home/datarobot/.ssh/authorized_keys"
+              ignoreErrors: "false"
+              env:
+                AWS_REGION: !Ref Region
+                MAIN_STACK: !Ref MainStack
+
+            4a-SetNodeCrontabSet:
+              command: !Sub |
+
+                # Force new line in the log
+                echo " "
+
+                my_name=$(aws ec2 describe-instances --region us-east-1 --instance-ids $(curl --silent http://169.254.169.254/latest/meta-data/instance-id) --query "Reservations[*].Instances[*].[Tags[?Key=='Name'].Value]" --output text)
+                my_name=${!my_name##*-}
+
+                if [[ $my_name == ModelingNode* ]]; then
+                  echo "Skipping Modeling nodes"
+                else
+                  echo 'Adding ($SCHEDULE) cronjob syncing /opt/datarobot/data to s3://$S3_BUCKET/$BACKUP_DIR/data/$my_name'                  
+                  printf '%s docker stop $(docker ps -aq) && aws s3 sync --no-progress /opt/datarobot/data s3://%s/%s/data/%s && docker start $(docker ps -aq)\n' "$SCHEDULE" "$S3_BUCKET" "$BACKUP_DIR" "$my_name" | tee -a /var/spool/cron/datarobot
+                fi
+              test: "test ${USE_S3_BACKUPS} = 'true'"
+              ignoreErrors: "false"
+              env:
+               DR_VERSION: !Ref DRVersion
+               BACKUP_DIR: !Ref BackupDir
+               S3_BUCKET: !Ref InstallationBucket
+               SCHEDULE: !Ref S3BucketBackupSchedule
+               USE_S3_BACKUPS: !Ref UseS3BucketBackups
+
+            4b-EnableBeats:
+              command: !Sub |
+
+                # Set the IP for now
+                elk=$(aws ec2 describe-instances --region $AWS_REGION --output text --filter "Name=tag:NodeType,Values=DataRobot" "Name=tag:Name,Values=$MAIN_STACK-ELKNode" --query "Reservations[].Instances[].[PrivateIpAddress]")
+                echo "Using ELK IP :> '$elk'"
+
+                # Install metricbeats ###
+                echo "Downloading metricbeat package :> https://artifacts.elastic.co/downloads/beats/metricbeat/metricbeat-oss-7.2.0-x86_64.rpm"
+                curl --silent --output /tmp/metricbeat-oss-7.2.0-x86_64.rpm -L -O https://artifacts.elastic.co/downloads/beats/metricbeat/metricbeat-oss-7.2.0-x86_64.rpm
+                rpm -vi /tmp/metricbeat-oss-7.2.0-x86_64.rpm
+
+                # Update the metricbeat configuration
+                sed -i "s/#host: \"localhost:5601\"/host: \"$elk:5601\"/" /etc/metricbeat/metricbeat.yml
+                sed -i "s/hosts: \[\"localhost:9200\"\]/hosts: \[\"$elk:9200\"\]/" /etc/metricbeat/metricbeat.yml
+
+                # Turn on metricbeat
+                /bin/metricbeat modules enable system
+                /bin/metricbeat setup
+                systemctl enable metricbeat
+                systemctl start metricbeat
+
+                # Clean up metricbeat rpm
+                rm /tmp/metricbeat-oss-7.2.0-x86_64.rpm
+
+                # TODO: Set as default index
+
+                ### Install FileBeats ###
+                echo "Downloading filebeats package :> https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-oss-7.1.1-x86_64.rpm"
+                curl --silent --output /tmp/filebeat-oss-7.1.1-x86_64.rpm -L -O https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-oss-7.1.1-x86_64.rpm
+                rpm -vi /tmp/filebeat-oss-7.1.1-x86_64.rpm
+
+                # Update the filebeat configuration
+                sed -i "s/#host: \"localhost:5601\"/host: \"$elk:5601\"/" /etc/filebeat/filebeat.yml
+                sed -i "s/hosts: \[\"localhost:9200\"\]/hosts: \[\"$elk:9200\"\]/" /etc/filebeat/filebeat.yml
+
+                # Target specific files
+                sed -i 's+- /var/log/\*.log+#- /var/log/\*.log\n    - /var/log/daemon.log\n    - /var/log/messages+' /etc/filebeat/filebeat.yml
+                sudo sed -i 's+- c:\\programdata\\elasticsearch\\logs\\\*+#- c:\\programdata\\elasticsearch\\logs\\\*\n    - /opt/datarobot/DataRobot-${DRVersion}/debug.log\n    - /opt/datarobot/logs/all.log\n    - /opt/datarobot/logs/audit.log\n    - /opt/datarobot/logs/datarobot.log\n    - /opt/datarobot/logs/datasets-service.log\n    - /opt/datarobot/logs/nginx.log\n    - /opt/datarobot/logs/pngexport.log\n+' /etc/filebeat/filebeat.yml
+
+                # Turn on filebeat
+                /bin/filebeat modules enable system
+                /bin/filebeat setup
+                systemctl enable filebeat
+                systemctl start filebeat
+
+                # Clean up filebeat rpm
+                rm /tmp/filebeat-oss-7.1.1-x86_64.rpm
+
+              test: "test ${LOG_SERVER} = 'ELK'"
+              ignoreErrors: "true"
+              env:
+                DR_VERSION: !Ref DRVersion
+                AWS_REGION: !Ref Region
+                LOG_SERVER: !Ref LogServer
+                MAIN_STACK: !Ref MainStack
+
+            4c-TagTheDataVolumes:
+              command: !Sub |
+
+                # Force new line in the log
+                echo " "
+
+                # Get the instance id
+                instance_id=$(curl --silent http://169.254.169.254/latest/meta-data/instance-id)
+
+                # Find the data volume id
+                data_valume_id=$(aws ec2 describe-instances --region $AWS_REGION --instance-id $instance_id --output text --query "Reservations[0].Instances[0].BlockDeviceMappings[1].Ebs.VolumeId")
+
+                # Get the node name
+                node_name=$(aws ec2 describe-instances --region $AWS_REGION --instance-id $instance_id --output text --query "Reservations[].Instances[].[Tags[?Key=='Name'].Value[]]" | sed "s/^$MAIN_STACK-//")
+
+                # Apply the tags to the instance
+                aws ec2 create-tags --resources $data_valume_id --region $AWS_REGION --tags "Key=Name,Value=$node_name-DataVolume" "Key=MainStack,Value=$MAIN_STACK" "Key=NodeType,Value=DataRobot"
+                echo "Tagged data volume :> '$data_valume_id' on node :> $node_name"
+
+              test: "test ${TAG_DATA_VOL} = 'true'"
+              ignoreErrors: "false"
+              env:
+                AWS_REGION: !Ref Region
+                MAIN_STACK: !Ref MainStack
+                TAG_DATA_VOL: !Ref TagDataVol
+
+    Properties: 
+      ImageId:  !Ref ImageId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref IAmProfile
+      KeyName: !Ref SSHKey
+      Monitoring: true
+      EbsOptimized: true
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            VolumeType: gp3
+            VolumeSize: !Ref NodeVolumeSize
+        - DeviceName: /dev/sdb
+          Ebs:
+            DeleteOnTermination: true
+            VolumeType: gp3
+            Encrypted: !Ref Encrypted
+            KmsKeyId: !If [ "UseKey", !Ref "EncryptionKey", !Ref "AWS::NoValue" ]
+            VolumeSize: !Ref DataVolumeSize
+      NetworkInterfaces:
+        - DeviceIndex: "0"
+          AssociatePublicIpAddress: !Ref PublicIpAddress
+          SubnetId: !Ref SubnetId
+          GroupSet: !Ref SecurityGroupIds
+
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/sh
+
+          ### START Debug ###
+          DRVersion=${DRVersion}
+          MainStack=${MainStack}
+          CurrentStackName=${AWS::StackName}
+          Encrypted=${Encrypted}
+          #EncryptionKey=${EncryptionKey}
+          IAmProfile=${IAmProfile}
+          InstallationBucket=${InstallationBucket}
+          InstanceType=${InstanceType}
+          ImageId=${ImageId}
+          LogServer=${LogServer}
+          NodeVolumeSize=${NodeVolumeSize}
+          PublicIpAddress=${PublicIpAddress}
+          Region=${Region}
+          SSHKey=${SSHKey}
+          S3StorageDir=${StorageDir}
+          SubnetId=${SubnetId}
+          ### END Debug ###
+
+          echo "yum install python3 python2"
+          yum install -y python3
+          python3 -m pip install --upgrade pip future boto3 argparse requests
+          yum install -y python2
+          python2 -m pip install --upgrade pip future boto3 argparse requests
+          # Install aws cloudformation packages
+          
+          /usr/bin/easy_install-3 --script-dir /opt/aws/bin https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+          # ^^^ attempting to use latest for native python 3 support in centos 8.2
+
+          # Start system provisioning
+          /opt/aws/bin/cfn-init -v --stack ${AWS::StackName} --resource EC2Instance --region ${Region}
+
+          # Signal template completion
+          /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${Region}
+
+Outputs:
+  InstanceId:
+    Description: "InstanceId of the newly created EC2 instance"
+    Value: !Ref EC2Instance
+  PrivateIP:
+    Description: "PrivateIP IP address of the newly created EC2 instance"
+    Value: !GetAtt EC2Instance.PrivateIp
