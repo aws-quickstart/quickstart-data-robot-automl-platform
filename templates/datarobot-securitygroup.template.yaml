@@ -7,6 +7,13 @@
 ​
 AWSTemplateFormatVersion: 2010-09-09
 Description: AWS CloudFormation Template with Security Group related reusable resources.
+Metadata:
+  QSLint:
+    Exclusions: [ W9002, W9003, W9006 ]
+  cfn-lint:
+    config:
+      ignore_checks:
+        - E9101 
 Parameters:
   MainStack:
     Type: String
